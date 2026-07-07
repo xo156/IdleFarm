@@ -10,12 +10,13 @@ namespace IdleFarm.UI.Popup {
         [SerializeField] private Button buyButton;
 
         private IdleFarmGame game;
+        private string upgradeId;
         private UpgradeData data;
 
         public void Initialize(IdleFarmGame game, UpgradeData data) {
-            Debug.Log($"Initialize : {data.upgradeName}");
             this.game = game;
             this.data = data;
+            this.upgradeId = data.id;
 
             buyButton.onClick.RemoveAllListeners();
             buyButton.onClick.AddListener(Buy);
@@ -24,24 +25,24 @@ namespace IdleFarm.UI.Popup {
         }
 
         public void Refresh() {
-            if (game == null || data == null)
+            if (game == null || data == null) {
                 return;
+            }
 
-            int level = game.GetUpgradeLevel(data.type);
+            int level = game.GetUpgradeLevel(upgradeId);
+            double cost = game.GetUpgradeCost(upgradeId);
 
             infoText.text =
-                $"{data.upgradeName}\n" +
+                $"{data.displayName}\n" +
                 $"Lv {level}\n" +
-                $"Cost : {game.GetUpgradeCost(data.type):N0}\n" +
+                $"Cost : {cost:N0}\n" +
                 $"+{data.bonusPerLevel}";
 
-            buyButton.interactable =
-                game.CanBuyUpgrade(data.type);
+            buyButton.interactable = game.CanBuyUpgrade(upgradeId);
         }
 
         private void Buy() {
-            Debug.Log($"Buy : {data.upgradeName}");
-            game.TryBuyUpgrade(data.type);
+            game.TryBuyUpgrade(upgradeId);
         }
     }
 }

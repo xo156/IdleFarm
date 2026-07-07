@@ -1,0 +1,25 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ae629b1d975caf04a87e0827901583e1, type: 3}
+  m_Name: Pet_Cat2
+  m_EditorClassIdentifier: 
+  id: pet_cat2
+  displayName: DarkCat
+  preview: {fileID: 256048711, guid: 4282a1e20e673d943a10aa8a0fdf40fc, type: 3}
+  description: 'Dark Cat
+
+
+    Increase Gold production by 10%.'
+  icon: {fileID: 256048711, guid: 4282a1e20e673d943a10aa8a0fdf40fc, type: 3}
+  price: 50
+  effectType: 2
+  bonusPercent: 0.1

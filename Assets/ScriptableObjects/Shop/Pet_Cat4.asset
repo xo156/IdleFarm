@@ -1,0 +1,25 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ae629b1d975caf04a87e0827901583e1, type: 3}
+  m_Name: Pet_Cat4
+  m_EditorClassIdentifier: 
+  id: pet_cat4
+  displayName: CharcoalCat
+  preview: {fileID: -1064045995, guid: 5a7b7a2372c9d36468409b34488877d9, type: 3}
+  description: 'Charcoal Cat
+
+
+    Increase Offline Reward by 10%.'
+  icon: {fileID: -1064045995, guid: 5a7b7a2372c9d36468409b34488877d9, type: 3}
+  price: 50
+  effectType: 4
+  bonusPercent: 0.1

@@ -1,55 +1,172 @@
+using IdleFarm.Constants;
+using IdleFarm.Core;
+using IdleFarm.Data.Item;
+using IdleFarm.UI.Popup;
+using System.Globalization;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
-using IdleFarm.Core;
-using TMPro;
 
+namespace IdleFarm.UI {
+    public sealed class FarmHUD : MonoBehaviour {
+        [Header("Game")]
+        [SerializeField] private IdleFarmGame game;
+        [SerializeField] private PopupManager popupManager;
 
-public class FarmHUD : MonoBehaviour {
-    [Header("Top Bar")]
-    [SerializeField] private TMP_Text goldText;
-    [SerializeField] private TMP_Text cropText;
-    [SerializeField] private TMP_Text productionText;
+        [Header("Texts")]
+        [SerializeField] private TMP_Text goldText;
+        [SerializeField] private TMP_Text cropsText;
+        [SerializeField] private TMP_Text productionText;
+        [SerializeField] private TMP_Text cropNameText;
 
-    [Header("Main Area")]
-    [SerializeField] private TMP_Text cropNameText;
-    [SerializeField] private Slider growthSlider;
-    [SerializeField] private Button harvestButton;
+        [Header("Buttons")]
+        [SerializeField] private Button harvestButton;
+        [SerializeField] private Button upgradeButton;
+        [SerializeField] private Button prestigeButton;
+        [SerializeField] private Button shopButton;
 
-    [Header("Bottom Menu")]
-    [SerializeField] private Button upgradeButton;
+        [Header("Items")]
+        [SerializeField] private Image petImage;
+        [SerializeField] private Image themeImage;
 
-    private IdleFarmGame game;
+        private void Awake() {
+            Debug.Assert(game != null, $"{nameof(FarmHUD)} : Game reference is missing.");
+            Debug.Assert(popupManager != null, $"{nameof(FarmHUD)} : PopupManager reference is missing.");
+        }
 
-    // Start is called before the first frame update
-    void Start()
-    {
-        game = FindFirstObjectByType<IdleFarmGame>();
+        private void OnEnable() {
+            Bind();
+            Refresh();
+        }
 
-        harvestButton.onClick.AddListener(OnHarvest);
+        private void OnDisable() {
+            Unbind();
+        }
 
-        RefreshUI();
+        private void Bind() {
+            if (game != null) {
+                game.StateChanged -= Refresh;
+                game.StateChanged += Refresh;
+            }
 
-        game.StateChanged += RefreshUI;
-    }
+            if (harvestButton != null) {
+                harvestButton.onClick.RemoveListener(OnHarvestClicked);
+                harvestButton.onClick.AddListener(OnHarvestClicked);
+            }
 
-    private void OnDestroy() {
-        if (game != null)
-            game.StateChanged -= RefreshUI;
-    }
+            if (upgradeButton != null) {
+                upgradeButton.onClick.RemoveListener(OnUpgradeClicked);
+                upgradeButton.onClick.AddListener(OnUpgradeClicked);
+            }
 
-    private void OnHarvest() {
-        game.Harvest();
-    }
+            if (prestigeButton != null) {
+                prestigeButton.onClick.RemoveListener(OnPrestigeClicked);
+                prestigeButton.onClick.AddListener(OnPrestigeClicked);
+            }
 
-    private void RefreshUI() {
-        goldText.text = $"Gold : {game.Gold:N0}";
+            if (shopButton != null) {
+                shopButton.onClick.RemoveListener(OnShopClicked);
+                shopButton.onClick.AddListener(OnShopClicked);
+            }
+        }
 
-        cropText.text = $"Crop : {game.Crops:N0}";
+        private void Unbind() {
+            if (game != null) {
+                game.StateChanged -= Refresh;
+            }
 
-        productionText.text = $"{game.CropsPerSecond:F1}/s";
+            if (harvestButton != null) {
+                harvestButton.onClick.RemoveListener(OnHarvestClicked);
+            }
 
-        cropNameText.text = $"Lv.{game.BetterSeedsLevel + 1} Wheat";
+            if (upgradeButton != null) {
+                upgradeButton.onClick.RemoveListener(OnUpgradeClicked);
+            }
 
-        growthSlider.value = Mathf.Clamp01((float)(game.Crops / 100.0));
+            if (prestigeButton != null) {
+                prestigeButton.onClick.RemoveListener(OnPrestigeClicked);
+            }
+
+            if (shopButton != null) {
+                shopButton.onClick.RemoveListener(OnShopClicked);
+            }
+        }
+
+        private void OnHarvestClicked() {
+            game?.Harvest();
+        }
+
+        private void OnUpgradeClicked() {
+            popupManager?.OpenUpgrade();
+        }
+
+        private void OnPrestigeClicked() {
+            popupManager?.OpenPrestige();
+        }
+
+        private void OnShopClicked() {
+            popupManager?.OpenShop();
+        }
+
+        private void Refresh() {
+            if (game == null) {
+                return;
+            }
+
+            if (goldText != null) {
+                goldText.text = $"Gold : {NumberFormatter.Format(game.Gold)}";
+            }
+
+            if (cropsText != null) {
+                cropsText.text = $"Crop : {NumberFormatter.Format(game.Crops)}";
+            }
+
+            if (productionText != null) {
+                string interval = game.ProductionInterval.ToString("0.#", CultureInfo.InvariantCulture);
+                productionText.text = $"Every {interval}s : +{NumberFormatter.Format(game.CropsPerProduction)} Crop";
+            }
+
+            if (harvestButton != null) {
+                harvestButton.interactable = game.Crops > 0.0d;
+            }
+
+            RefreshCropName();
+            RefreshPet();
+            RefreshTheme();
+        }
+
+        private void RefreshCropName() {
+            int level = game.GetUpgradeLevel(UpgradeIds.BetterSeeds);
+            cropNameText.text = $"Lv.{level} {game.CropName}";
+        }
+
+        private void RefreshPet() {
+            if (string.IsNullOrEmpty(game.EquippedPetId)) {
+                petImage.enabled = false;
+                return;
+            }
+
+            PetItemData pet = game.GetItem(game.EquippedPetId) as PetItemData;
+            if (pet == null) {
+                petImage.enabled = false;
+                return;
+            }
+
+            petImage.enabled = true;
+            petImage.sprite = pet.preview;
+        }
+
+        private void RefreshTheme() {
+            if (string.IsNullOrEmpty(game.EquippedThemeId)) {
+                return;
+            }
+
+            ThemeItemData theme = game.GetItem(game.EquippedThemeId) as ThemeItemData;
+            if (theme == null) {
+                return;
+            }
+
+            themeImage.sprite = theme.preview;
+        }
     }
 }

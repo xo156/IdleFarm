@@ -9,6 +9,9 @@ namespace IdleFarm.UI.Popup {
         [Header("Popups")]
         [SerializeField] private UpgradePopupController upgradePopup;
         [SerializeField] private OfflineRewardPopupController offlineRewardPopup;
+        [SerializeField] private PrestigePopupController prestigePopup; 
+        [SerializeField] private ShopPopupController shopPopup;
+        [SerializeField] private InventoryPopupController inventoryPopup;
         [SerializeField] private CanvasGroup safeAreaCanvasGroup;
 
         private IPopup currentPopup; // 현재 열려있는 팝업
@@ -17,9 +20,7 @@ namespace IdleFarm.UI.Popup {
         public bool IsPopupOpen => currentPopup != null;
 
         private void Awake() {
-            if (game == null) {
-                game = FindFirstObjectByType<IdleFarmGame>();
-            }
+            Debug.Assert(game != null, $"{nameof(PopupManager)} : Game reference is missing.");
         }
 
         private void Start() {
@@ -66,6 +67,18 @@ namespace IdleFarm.UI.Popup {
 
         public void OpenOfflineReward() {
             OpenPopup(offlineRewardPopup, offlineRewardPopup);
+        }
+
+        public void OpenPrestige() {
+            OpenPopup(prestigePopup, prestigePopup);
+        }
+
+        public void OpenShop() {
+            OpenPopup(shopPopup, shopPopup);
+        }
+
+        public void OpenInventory() {
+            OpenPopup(inventoryPopup, inventoryPopup);
         }
 
         public void CloseCurrentPopup() {

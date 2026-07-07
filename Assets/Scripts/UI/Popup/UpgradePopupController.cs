@@ -1,20 +1,27 @@
-using IdleFarm.Core;
 using System.Collections.Generic;
 using UnityEngine;
-
+using UnityEngine.UI;
+using IdleFarm.Core;
 
 namespace IdleFarm.UI.Popup {
     public class UpgradePopupController : MonoBehaviour, IPopup {
         [Header("References")]
         [SerializeField] private IdleFarmGame game;
         [SerializeField] private PopupManager popupManager;
-
+        [SerializeField] private Button closeButton;
         [SerializeField] private Transform content;
         [SerializeField] private UpgradeItemUI itemPrefab;
-
         private readonly List<UpgradeItemUI> items = new();
 
+        private void Awake() {
+            Debug.Assert(game != null, $"{nameof(UpgradePopupController)} : Game reference is missing.");
+            Debug.Assert(popupManager != null, $"{nameof(UpgradePopupController)} : PopupManager reference is missing.");
+            Debug.Assert(content != null, $"{nameof(UpgradePopupController)} : Content reference is missing.");
+            Debug.Assert(itemPrefab != null, $"{nameof(UpgradePopupController)} : ItemPrefab reference is missing.");
+            Debug.Assert(closeButton != null, $"{nameof(UpgradePopupController)} : CloseButton reference is missing.");
 
+            closeButton.onClick.AddListener(OnClose);
+        }
         private void OnEnable() {
             if (game != null) {
                 game.StateChanged += Refresh;
@@ -22,6 +29,12 @@ namespace IdleFarm.UI.Popup {
 
             CreateItems();
             Refresh();
+        }
+
+        private void OnDisable() {
+            if (game != null) {
+                game.StateChanged -= Refresh;
+            }
         }
 
         private void CreateItems() {
@@ -33,16 +46,8 @@ namespace IdleFarm.UI.Popup {
 
             foreach (var upgrade in game.Upgrades) {
                 var ui = Instantiate(itemPrefab, content);
-                Debug.Log($"Create UI : {upgrade.upgradeName}");
                 ui.Initialize(game, upgrade);
-
                 items.Add(ui);
-            }
-        }
-
-        private void OnDisable() {
-            if (game != null) {
-                game.StateChanged -= Refresh;
             }
         }
 
@@ -58,6 +63,10 @@ namespace IdleFarm.UI.Popup {
             foreach (var item in items) {
                 item.Refresh();
             }
+        }
+
+        private void OnClose() {
+            popupManager.CloseCurrentPopup();
         }
     }
 }

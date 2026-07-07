@@ -1,12 +1,14 @@
+using IdleFarm.Constants;
+using IdleFarm.Data;
+using IdleFarm.Data.Item;
+using IdleFarm.Save;
 using System;
 using System.Collections.Generic;
-using IdleFarm.Save;
-using IdleFarm.Data;
 using UnityEngine;
-
 
 namespace IdleFarm.Core {
     public sealed class IdleFarmGame : MonoBehaviour {
+        #region Inspector
         [Header("Starting State")]
         [SerializeField] private double gold;
         [SerializeField] private double crops;
@@ -16,230 +18,627 @@ namespace IdleFarm.Core {
         [SerializeField] private double productionInterval = 1.0d;
         [SerializeField] private double goldPerCrop = 1.0d;
 
+        [Header("Crop")]
+        [SerializeField] private List<string> cropNames = new() {
+            "Wheat",
+            "Carrot",
+            "Corn",
+            "Rice",
+            "Blue Wheat",
+            "Golden Wheat"
+        };
+
         [Header("Upgrade")]
         [SerializeField] private List<UpgradeData> upgrades = new();
-        private readonly Dictionary<UpgradeType, int> upgradeLevels = new();
 
         [Header("Offline")]
         [SerializeField] private double pendingOfflineCrops;
-        public double PendingOfflineCrops => pendingOfflineCrops;
+
+        [Header("Prestige")] // 내실
+        [SerializeField] private double prestigePoints;
+        [SerializeField] private double prestigeBaseRequirement = 10000.0d;
+        [SerializeField] private double prestigeRequirementMultiplier = 1.5d;
+
+        [Header("Shop")]
+        [SerializeField] private ShopDatabase shopDatabase;
+
+        [Header("Player Statistics")]
+        [SerializeField] private double totalGoldEarned;
+        [SerializeField] private double totalCropsProduced;
+        [SerializeField] private double totalCropsHarvested;
+        [SerializeField] private int totalPrestigeCount;
+        #endregion
+
+        #region Runtime Field
+        private Dictionary<string, int> upgradeLevels;
+        private Dictionary<string, UpgradeData> upgradeDatabase;
+
+        private readonly Dictionary<string, ItemData> itemLookup = new();
+        private readonly Dictionary<string, int> ownedItems = new();
 
         private double productionTimer;
 
-        // 변경 사항이 있으면 HUD가 화면을 새로 그리도록 알려주는 이벤트
+        private string equippedPetId;
+        private string equippedThemeId;
+
         public event Action StateChanged;
 
+        public double GoldPerCrop {
+            get {
+                double value = goldPerCrop;
+                value += GetUpgradeBonus(UpgradeIds.CropQuality);
+                value *= GetPetMultiplier(PetEffectType.GoldProduction);
+                value *= GetPrestigeMultiplier();
+
+                return value;
+            }
+        }
+
+        public double CropsPerProduction {
+            get {
+                double value = baseCropsPerProduction;
+                value += GetUpgradeBonus(UpgradeIds.BetterSeeds);
+                value *= GetPetMultiplier(PetEffectType.CropProduction);
+                value *= GetPrestigeMultiplier();
+
+                return value;
+            }
+        }
+
+        public double ProductionInterval {
+            get {
+                double value = productionInterval;
+                value /= GetPetMultiplier(PetEffectType.ProductionSpeed);
+
+                return Math.Max(0.1d, value);
+            }
+        }
+        #endregion
+
+        #region Property
         public double Gold => gold;
         public double Crops => crops;
-
-        public double ProductionInterval => Math.Max(0.1d, productionInterval);
-
-        public double CropsPerProduction =>
-            baseCropsPerProduction +
-            GetUpgradeLevel(UpgradeType.BetterSeeds) *
-            GetUpgrade(UpgradeType.BetterSeeds).bonusPerLevel;
-
         public double CropsPerSecond => CropsPerProduction / ProductionInterval;
+        public IReadOnlyList<UpgradeData> Upgrades => upgrades;
+        public double PendingOfflineCrops => pendingOfflineCrops;
+        public double PrestigePoints => prestigePoints;
+        public string EquippedPetId => equippedPetId;
+        public string EquippedThemeId => equippedThemeId;
+        public IReadOnlyDictionary<string, int> OwnedItems => ownedItems;
+        public double TotalGoldEarned => totalGoldEarned;
+        public double TotalCropsProduced => totalCropsProduced;
+        public double TotalCropsHarvested => totalCropsHarvested;
+        public int TotalPrestigeCount => totalPrestigeCount;
+        public string CropName {
+            get {
+                int stage = GetUpgradeLevel(UpgradeIds.BetterSeeds) / 10;
+                if (cropNames == null || cropNames.Count == 0) {
+                    return "Unknown";
+                }
 
-        public double GoldPerCrop =>
-            goldPerCrop +
-            GetUpgradeLevel(UpgradeType.CropQuality) *
-            GetUpgrade(UpgradeType.CropQuality).bonusPerLevel;
+                if (stage >= cropNames.Count) {
+                    return cropNames[cropNames.Count - 1];
+                }
 
-        public int BetterSeedsLevel => GetUpgradeLevel(UpgradeType.BetterSeeds);
+                return cropNames[stage];
+            }
+        }
+        #endregion
 
-        public int CropQualityLevel => GetUpgradeLevel(UpgradeType.CropQuality);
-
-        public double BetterSeedsProductionBonus => GetUpgrade(UpgradeType.BetterSeeds).bonusPerLevel;
-
-        public double CropQualityPriceBonus => GetUpgrade(UpgradeType.CropQuality).bonusPerLevel;
-
+        #region Unity Messages
         private void Awake() {
+            BuildUpgradeDatabase();
+            BuildItemLookup();
+
             LoadGame();
+
+            foreach (var item in ownedItems) {
+                Debug.Log($"item: {item}");
+            }
         }
 
         private void Update() {
             TickCropProduction(Time.deltaTime);
-
             HandleDebugInput();
         }
 
-        private void HandleDebugInput() {
-            if (Input.GetKeyDown(KeyCode.F12)) {
-                ResetSave();
-            }
-        }
-
-        private void OnApplicationQuit() {
-            SaveGame();
-        }
+        private void OnApplicationQuit() => SaveGame();
 
         private void OnApplicationPause(bool isPaused) {
             if (isPaused) {
                 SaveGame();
             }
         }
+        #endregion
 
+        #region Initialization
+        private void BuildUpgradeDatabase() {
+            upgradeDatabase = new Dictionary<string, UpgradeData>();
+            upgradeLevels = new Dictionary<string, int>();
+
+            foreach (var upgrade in upgrades) {
+                if (upgrade == null || string.IsNullOrEmpty(upgrade.id)) {
+                    Debug.LogError("Invalid UpgradeData");
+                    continue;
+                }
+
+                upgradeDatabase[upgrade.id] = upgrade;
+                upgradeLevels[upgrade.id] = 0;
+            }
+        }
+
+        private void BuildItemLookup() {
+            itemLookup.Clear();
+            if (shopDatabase == null) {
+                Debug.LogError("shopDatabase is missing.");
+                return;
+            }
+
+            foreach (var item in shopDatabase.items) {
+                if (item == null) {
+                    continue;
+                }
+
+                if (itemLookup.ContainsKey(item.id)) {
+                    Debug.LogError($"Duplicate Item ID : {item.id}");
+                    continue;
+                }
+
+                itemLookup.Add(item.id, item);
+            }
+        }
+        private void LoadGame() {
+            if (!SaveManager.TryLoad(out var save)) {
+                return;
+            }
+
+            // 음수값 안들어오도록
+            gold = Math.Max(0.0d, save.gold);
+            crops = Math.Max(0.0d, save.crops);
+
+            totalGoldEarned = Math.Max(0.0d, save.totalGoldEarned);
+            totalCropsProduced = Math.Max(0.0d, save.totalCropsProduced);
+            totalCropsHarvested = Math.Max(0.0d, save.totalCropsHarvested);
+            totalPrestigeCount = Math.Max(0, save.totalPrestigeCount);
+
+            prestigePoints = Math.Max(0.0d, save.prestigePoints);
+
+            equippedPetId = save.equippedPetId;
+            equippedThemeId = save.equippedThemeId;
+
+            // 업그레이드 불러오기
+            foreach (var upgrade in save.upgrades) {
+                if (upgradeLevels.ContainsKey(upgrade.upgradeId)) {
+                    upgradeLevels[upgrade.upgradeId] = upgrade.level;
+                }
+            }
+
+            // 아이템 불러오기
+            ownedItems.Clear();
+            foreach (var item in save.items) {
+                if (item.quantity <= 0) {
+                    continue;
+                }
+
+                ownedItems[item.itemId] = item.quantity;
+            }
+
+            // 오프라인 보상
+            if (save.lastSaveTimeTicks > 0) {
+                var last = new DateTime(save.lastSaveTimeTicks, DateTimeKind.Utc);
+                double elapsed = (DateTime.UtcNow - last).TotalSeconds;
+                elapsed = Math.Min(elapsed, 43200);
+                pendingOfflineCrops = elapsed * CropsPerSecond * GetPetMultiplier(PetEffectType.OfflineReward);
+            }
+
+            // 현재 장착중인 아이템 불러오기
+            if (!string.IsNullOrEmpty(equippedPetId) && GetItemCount(equippedPetId) <= 0) {
+                equippedPetId = string.Empty;
+            }
+
+            if (!string.IsNullOrEmpty(equippedThemeId) && GetItemCount(equippedThemeId) <= 0) {
+                equippedThemeId = string.Empty;
+            }
+        }
+        #endregion
+
+        #region Production
         private void TickCropProduction(float deltaTime) {
             productionTimer += deltaTime;
+
             while (productionTimer >= ProductionInterval) {
                 AddCrops(CropsPerProduction);
                 productionTimer -= ProductionInterval;
             }
         }
 
-        // 현재 보유한 작물을 모두 판매해서 Gold로 
-        public void Harvest() {
-            if (crops <= 0.0d) {
+        public void AddGold(double amount) {
+            if (amount <= 0) {
                 return;
             }
 
-            gold += crops * GoldPerCrop;
-            crops = 0.0d;
+            gold += amount;
+            totalGoldEarned += amount;
+
+            NotifyStateChanged();
+        }
+
+        public void AddCrops(double amount) {
+            if (amount <= 0) {
+                return;
+            }
+
+            crops += amount;
+            totalCropsProduced += amount;
+            NotifyStateChanged();
+        }
+
+        public void Harvest() {
+            if (crops <= 0) {
+                return;
+            }
+
+            double harvestedCrops = crops;
+            double earnedGold = harvestedCrops * GoldPerCrop;
+            gold += earnedGold;
+
+            totalGoldEarned += earnedGold;
+            totalCropsHarvested += harvestedCrops;
+            crops = 0;
+
             SaveGame();
             NotifyStateChanged();
         }
 
-        public bool TryBuyUpgrade(UpgradeType type) {
-            double cost = GetUpgradeCost(type);
+        public void ClaimOfflineReward() {
+            if (pendingOfflineCrops <= 0) {
+                return;
+            }
 
+            AddCrops(pendingOfflineCrops);
+            pendingOfflineCrops = 0;
+
+            SaveGame();
+            NotifyStateChanged();
+        }
+        #endregion
+
+        #region Upgrade
+        public bool TryBuyUpgrade(string id) {
+            var data = GetUpgrade(id);
+            if (data == null) {
+                return false;
+            }
+
+            double cost = GetUpgradeCost(id);
             if (gold < cost) {
-                // 코스트보다 돈이 없으면 업그레이드 못하니까
                 return false;
             }
 
             gold -= cost;
-
-            IncreaseUpgradeLevel(type);
+            IncreaseUpgradeLevel(id);
 
             SaveGame();
+            NotifyStateChanged();
+            return true;
+        }
 
+        public int GetUpgradeLevel(string id) {
+            return upgradeLevels.TryGetValue(id, out var level) ? level : 0;
+        }
+
+        private void IncreaseUpgradeLevel(string id) {
+            upgradeLevels[id] = GetUpgradeLevel(id) + 1;
+        }
+
+        public UpgradeData GetUpgrade(string id) {
+            return upgradeDatabase.TryGetValue(id, out var data) ? data : null;
+        }
+
+        public double GetUpgradeCost(string id) {
+            var data = GetUpgrade(id);
+            if (data == null) {
+                return 0;
+            }
+
+            int level = GetUpgradeLevel(id);
+
+            return Math.Ceiling(data.baseCost * Math.Pow(data.costMultiplier, level));
+        }
+
+        private double GetUpgradeBonus(string id) {
+            UpgradeData data = GetUpgrade(id);
+            if (data == null) {
+                return 0;
+            }
+
+            return GetUpgradeLevel(id) * data.bonusPerLevel;
+        }
+
+        public bool CanBuyUpgrade(string id) {
+            return gold >= GetUpgradeCost(id);
+        }
+        #endregion
+
+        #region Item
+        public ItemData GetItem(string itemId) {
+            if (itemLookup.TryGetValue(itemId, out var item)) {
+                return item;
+            }
+
+            Debug.LogError($"Item not found : {itemId}");
+            return null;
+        }
+
+        public int GetItemCount(string itemId) {
+            if (ownedItems.TryGetValue(itemId, out int count)) {
+                return count;
+            }
+
+            return 0;
+        }
+
+        public bool TryBuyItem(string itemId) {
+            ItemData item = GetItem(itemId);
+            if (item is not ShopItemData shopItem) {
+                return false;
+            }
+
+            if (gold < shopItem.price) {
+                return false;
+            }
+
+            gold -= shopItem.price;
+
+            switch (item) {
+                case ConsumableItemData consumable:
+                    UseConsumable(consumable);
+                    break;
+
+                case PetItemData pet:
+                    AddItem(pet.id, 1);
+                    break;
+
+                case ThemeItemData Theme:
+                    AddItem(Theme.id, 1);
+                    break;
+            }
+
+            SaveGame();
             NotifyStateChanged();
 
             return true;
         }
 
-        // 저장 파일을 지우고 현재 플레이 상태도 새 게임 상태로
-        public void ResetSave() {
-            Debug.Log("DEBUG RESET GAME");
+        public void UseItem(string itemId) {
+            ItemData item = GetItem(itemId);
+            if (item == null) {
+                return;
+            }
 
-            SaveManager.DeleteSave();
-            ResetGameState();
-            pendingOfflineCrops = 0.0d;
-            productionTimer = 0.0d;
+            switch (item) {
+                case PetItemData pet:
+                    EquipPet(pet);
+                    break;
+
+                case ThemeItemData Theme:
+                    EquipTheme(Theme);
+                    break;
+            }
+
             SaveGame();
             NotifyStateChanged();
         }
 
-        private void LoadGame() {
-            if (!SaveManager.TryLoad(out var saveData)) {
-                return;
-            }
+        private void UseConsumable(ConsumableItemData item) {
+            switch (item.effectId) {
+                case ShopEffects.AddCrop:
+                    AddCrops(item.value);
+                    break;
 
-            gold = Math.Max(0.0d, saveData.gold);
-            crops = Math.Max(0.0d, saveData.crops);
-            upgradeLevels.Clear();
-            upgradeLevels[UpgradeType.BetterSeeds] = Math.Max(0, saveData.betterSeedsLevel);
-            upgradeLevels[UpgradeType.CropQuality] = Math.Max(0, saveData.cropQualityLevel);
-            productionTimer = 0.0d;
+                case ShopEffects.AddGold:
+                    AddGold(item.value);
+                    break;
 
-            if (saveData.lastSaveTimeTicks > 0) {
-                var lastSaveTime = new DateTime(saveData.lastSaveTimeTicks, DateTimeKind.Utc);
-                double elapsedSeconds = (DateTime.UtcNow - lastSaveTime).TotalSeconds;
-                elapsedSeconds = Math.Min(elapsedSeconds, 43200.0);
-                pendingOfflineCrops = elapsedSeconds * CropsPerSecond;
-            }
-            else {
-                pendingOfflineCrops = 0.0d;
+                default:
+                    Debug.LogWarning($"Unknown Effect : {item.id}");
+                    break;
             }
         }
 
+        private void AddItem(string itemId, int amount) {
+            if (amount <= 0)
+                return;
+
+            ownedItems[itemId] = GetItemCount(itemId) + amount;
+        }
+        #endregion
+
+        #region Equip
+        private void EquipPet(PetItemData pet) {
+            if (pet == null) {
+                return;
+            }
+
+            if (GetItemCount(pet.id) <= 0) {
+                return;
+            }
+
+            equippedPetId = pet.id;
+            Debug.Log($"Equip Pet : {pet.displayName}");
+            SaveGame();
+            NotifyStateChanged();
+        }
+
+        private void EquipTheme(ThemeItemData Theme) {
+            if (Theme == null) {
+                return;
+            }
+
+            if (GetItemCount(Theme.id) <= 0) {
+                return;
+            }
+
+            equippedThemeId = Theme.id;
+            Debug.Log($"Equip Theme : {Theme.displayName}");
+            SaveGame();
+            NotifyStateChanged();
+        }
+
+        public bool IsItemEquipped(ItemData item) {
+            if (item == null) {
+                return false;
+            }
+
+            switch (item) {
+                case PetItemData pet:
+                    return equippedPetId == pet.id;
+
+                case ThemeItemData Theme:
+                    return equippedThemeId == Theme.id;
+
+                default:
+                    return false;
+            }
+        }
+
+        private double GetPetMultiplier(PetEffectType effect) {
+            if (string.IsNullOrEmpty(equippedPetId))
+                return 1.0;
+
+            ItemData item = GetItem(equippedPetId);
+
+            if (item is not PetItemData pet)
+                return 1.0;
+
+            if (pet.effectType != effect)
+                return 1.0;
+
+            return 1.0 + pet.bonusPercent;
+        }
+        #endregion
+
+        #region Prestige
+        public bool CanPrestige() {
+            return totalGoldEarned >= GetNextPrestigeTarget();
+        }
+
+        public double GetNextPrestigeTarget() {
+            return prestigeBaseRequirement * Math.Pow(prestigeRequirementMultiplier, prestigePoints);
+        }
+
+        public double GetPrestigeMultiplier() {
+            return 1.0d + (prestigePoints * 0.05d);
+        }
+
+        public void DoPrestige() {
+            if (!CanPrestige()) {
+                return;
+            }
+
+            prestigePoints += 1.0d;
+            totalPrestigeCount++;
+
+            ResetSave();
+
+            SaveGame();
+            NotifyStateChanged();
+        }
+        #endregion
+
+        #region Save
         private void SaveGame() {
             SaveManager.Save(CreateSaveData());
         }
 
         private SaveData CreateSaveData() {
-            return new SaveData {
+            var save = new SaveData {
                 gold = gold,
                 crops = crops,
-                betterSeedsLevel = GetUpgradeLevel(UpgradeType.BetterSeeds),
-                cropQualityLevel = GetUpgradeLevel(UpgradeType.CropQuality),
-                lastSaveTimeTicks = DateTime.UtcNow.Ticks
+                lastSaveTimeTicks = DateTime.UtcNow.Ticks,
+                totalGoldEarned = totalGoldEarned,
+                totalCropsProduced = totalCropsProduced,
+                totalCropsHarvested = totalCropsHarvested,
+                totalPrestigeCount = totalPrestigeCount,
+                prestigePoints = prestigePoints,
+                equippedPetId = equippedPetId,
+                equippedThemeId = equippedThemeId
             };
-        }
 
-        private void ResetGameState() {
-            gold = 0.0d;
-            crops = 0.0d;
+            // 업그레이드 목록
+            foreach (var keyValue in upgradeLevels) {
+                save.upgrades.Add(new UpgradeSaveData {
+                    upgradeId = keyValue.Key,
+                    level = keyValue.Value
+                });
+            }
+
+            // 아이템 목록
+            foreach (var keyValue in ownedItems) {
+                save.items.Add(new ItemSaveData {
+                    itemId = keyValue.Key,
+                    quantity = keyValue.Value
+                });
+            }
+
+            return save;
+        }
+        #endregion
+
+        #region Rest
+        private void ResetProgress() {
+            gold = 0;
+            crops = 0;
             upgradeLevels.Clear();
-            productionTimer = 0.0d;
-            pendingOfflineCrops = 0.0d;
+            pendingOfflineCrops = 0;
+            productionTimer = 0;
         }
 
-        private double CalculateUpgradeCost(UpgradeType type) {
-            UpgradeData data = GetUpgrade(type);
-            if (data == null) {
-                Debug.LogError($"UpgradeData missing in list: {type}");
-                return 0;
-            }
-
-            int level = GetUpgradeLevel(type);
-            return Math.Ceiling(data.baseCost * Math.Pow(data.costMultiplier, level));
+        private void ResetGame() {
+            gold = 0;
+            crops = 0;
+            upgradeLevels.Clear();
+            pendingOfflineCrops = 0;
+            productionTimer = 0;
         }
 
-        public double GetUpgradeCost(UpgradeType type) {
-            return CalculateUpgradeCost(type);
-        }
-
-        public bool CanBuyUpgrade(UpgradeType type) {
-            return gold >= GetUpgradeCost(type);
-        }
-
-        public void AddCrops(double amount) {
-            if (amount <= 0.0d) {
-                return;
-            }
-
-            crops += amount;
+        private void ResetSave() {
+            SaveManager.DeleteSave();
+            ResetGame();
+            SaveGame();
             NotifyStateChanged();
         }
 
-        public void ClaimOfflineReward() {
-            if (pendingOfflineCrops <= 0.0d) {
-                return;
-            }
+        public void ResetAllData() {
+            SaveManager.DeleteSave();
 
-            AddCrops(pendingOfflineCrops);
+            ResetProgress();
 
-            pendingOfflineCrops = 0.0d;
+            prestigePoints = 0;
+
+            totalGoldEarned = 0;
+            totalCropsProduced = 0;
+            totalCropsHarvested = 0;
+            totalPrestigeCount = 0;
+
+            ownedItems.Clear();
+            equippedPetId = "";
+            equippedThemeId = "";
 
             SaveGame();
+            NotifyStateChanged();
         }
+        #endregion
 
-        private void NotifyStateChanged() {
-            StateChanged?.Invoke();
-        }
+        #region Utility
+        private void NotifyStateChanged() => StateChanged?.Invoke();
 
-        public IReadOnlyList<UpgradeData> Upgrades => upgrades;
-
-        public UpgradeData GetUpgrade(UpgradeType type) {
-            var upgrade = upgrades.Find(x => x.type == type);
-            if (upgrade == null) {
-                Debug.LogError($"UpgradeData not found : {type}");
+        private void HandleDebugInput() {
+            if (Input.GetKeyDown(KeyCode.F12)) {
+                // F12누르면 초기화
+                ResetAllData();
             }
-
-            return upgrade;
         }
-
-        public int GetUpgradeLevel(UpgradeType type) {
-            if (upgradeLevels.TryGetValue(type, out var level)) {
-                return level;
-            }
-            return 0;
-        }
-
-        private void IncreaseUpgradeLevel(UpgradeType type) {
-            upgradeLevels[type] = GetUpgradeLevel(type) + 1;
-        }
+        #endregion
     }
 }
